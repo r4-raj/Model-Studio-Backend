@@ -1,23 +1,24 @@
 import express from "express";
 import cors from "cors";
-import generateRouter from "./routes/generate.js";
+import generateRouter from "./routes/generate.js"; // Assume this file is still called generate.js
 
 const app = express();
 
 app.use(
   cors({
-    origin: "*", // for dev / testing; later restrict to your frontend domain
+    origin: "*", // Keeping permissive CORS for now, but ensure it's secure later
   })
 );
 
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // Ensure body parser handles large image data
 
 // health check
 app.get("/", (req, res) => {
   res.send("Model Studio backend is running");
 });
 
-// main route
-app.use("/api/generate-image", generateRouter);
+// 🚨 FIX HERE: Set base path to /api
+// The full path will now be /api + /generate-image (defined in generateRouter)
+app.use("/api", generateRouter);
 
 export default app;
