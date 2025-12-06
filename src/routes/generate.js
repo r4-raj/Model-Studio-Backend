@@ -4,10 +4,16 @@ import { generateImage } from "../controllers/generateController.js";
 
 const router = express.Router();
 // Stores file in memory, as required for multer and most AI endpoints
-const upload = multer(); 
+const upload = multer();
 
-// 🚨 FIX HERE: Changed path from "/" to "/generate-image"
-// Full Path = (app.js: /api) + (router: /generate-image) = /api/generate-image
-router.post("/generate-image", upload.single("referenceImage"), generateImage);
+// Accept main reference image (required) + optional second reference
+router.post(
+  "/generate-image",
+  upload.fields([
+    { name: "referenceImage", maxCount: 1 },
+    { name: "referenceImage2", maxCount: 1 },
+  ]),
+  generateImage
+);
 
 export default router;
