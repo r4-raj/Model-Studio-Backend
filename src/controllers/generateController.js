@@ -165,13 +165,16 @@
 
         /* -------------------- CAMERA & LENS (CRITICAL FIX) -------------------- */
         promptParts.push(`
-    [CAMERA_AND_LENS_REALISM]
-    - Camera height: 130–145 cm from floor (natural indoor photography)
-    - Lens: 35–50mm full-frame equivalent
-    - Perspective must align with sofa height, window lines, and ceiling lines
-    - Model must NOT appear closer to the camera than nearby furniture
-    [/CAMERA_AND_LENS_REALISM]
-    `);
+          [CAMERA_AND_LENS_REALISM]
+          - Camera height: chest to eye level (130–145 cm)
+          - Lens: 35–50mm full-frame equivalent
+          - Camera angle: slight horizontal angle (5–10 degrees), NOT perfectly straight-on
+          - Composition should feel like a lifestyle fashion shoot
+          - Avoid architectural symmetry
+          - Model must feel naturally placed in the environment
+          [/CAMERA_AND_LENS_REALISM]
+          `);
+          
 
         /* -------------------- POSE -------------------- */
         promptParts.push(`
@@ -205,6 +208,16 @@
     [/SCENE_INTEGRATION_AND_BACKGROUND]
     `);
 
+    promptParts.push(`
+      [BACKGROUND_STYLE_REFERENCE]
+      - Background style must resemble a real lifestyle photoshoot
+      - Primary background elements: windows, curtains, soft walls, furniture
+      - DO NOT show ceiling, roof, or upper wall edges
+      - Avoid full-room wide-angle views
+      - Background should feel open, airy, and naturally lit
+      [/BACKGROUND_STYLE_REFERENCE]
+      `);
+      
         /* -------------------- ACCESSORIES -------------------- */
         promptParts.push(`
     [ACCESSORIES]
