@@ -1,10 +1,7 @@
-// backend/controllers/generateController.js
 import { genAI } from "../config/gemini.js";
 
 /**
  * generateImage - with HARD_STRICT_MODE toggle
- *
- * Put HARD_STRICT_MODE=true in .env to enable the more forceful prompt template.
  */
 export const generateImage = async (req, res) => {
   try {
@@ -67,176 +64,195 @@ export const generateImage = async (req, res) => {
       return parts.join(" and ");
     };
 
-    // Build attributes map (server-normalized)
+    /* ------------------------ Attributes ------------------------ */
     const attributes = {
       modelType: present(modelType) ? modelType : null,
-      modelTypeNote: present(modelTypeNote) ? modelTypeNote : null,
       modelExpression: isArrayPresent(modelExpression) ? modelExpression : null,
-      modelExpressionNote: present(modelExpressionNote) ? modelExpressionNote : null,
       hair: present(hair) ? hair : null,
-      hairNote: present(hairNote) ? hairNote : null,
       pose: present(pose) ? pose : null,
-      poseNote: present(poseNote) ? poseNote : null,
       location: present(location) ? location : null,
-      locationNote: present(locationNote) ? locationNote : null,
       accessories: present(accessories) ? accessories : null,
-      accessoriesNote: present(accessoriesNote) ? accessoriesNote : null,
       otherOption: present(otherOption) ? otherOption : null,
-      otherOptionNote: present(otherOptionNote) ? otherOptionNote : null,
       otherDetails: present(otherDetails) ? otherDetails : null,
     };
 
-    const changedFields = Object.keys(attributes).filter((k) => {
-      if (k.endsWith("Note")) return false;
-      return attributes[k] !== null;
-    });
+    const changedFields = Object.keys(attributes).filter(
+      (k) => attributes[k] !== null
+    );
 
-    // Detect zoom
-    const poseText = (attributes.pose || "") + " " + (attributes.poseNote || "");
-    const zoomKeywords = ["zoom", "close up", "close-up", "head to knees", "head-to-knees", "zoomed", "closeup"];
-    const isZoom = zoomKeywords.some((kw) => poseText.toLowerCase().includes(kw));
+    /* -------------------- Blur Detection (GLOBAL FIX) -------------------- */
+    const locationText =
+      (location || "") + " " + (locationNote || "");
+    const isBlurredBackground =
+      locationText.toLowerCase().includes("blur");
 
-    // Defaults (not treated as 'changed')
+    /* -------------------- Defaults -------------------- */
     const defaults = {
-      modelType: "Indian woman, medium height, average build, neutral catalog look",
-      modelExpression: "natural expression, age 20–40",
+      modelType: "Indian woman, medium height, average build, realistic proportions",
+      modelExpression: "natural relaxed expression, age 20–40",
       hair: "classic Indian hairstyle, neat bun or braid",
-      pose: "front pose – full body, facing camera, standing straight",
-      location: "plain white studio background, soft shadows",
-      accessories: "light traditional jewellery, nothing too heavy",
-      otherOption: "match the saree design and colours exactly from the primary reference image",
+      pose: "full body front pose, standing naturally",
+      location: "professional indoor environment",
+      accessories: "light traditional jewellery only",
+      otherOption:
+        "match saree design, border, motifs, and colours exactly from primary reference image",
     };
 
-    // Build final phrases
     const attrPhrases = {
-      modelType: mergeChoice(attributes.modelType, attributes.modelTypeNote, defaults.modelType),
-      modelExpression: formatExpression(attributes.modelExpression, attributes.modelExpressionNote),
-      hair: mergeChoice(attributes.hair, attributes.hairNote, defaults.hair),
-      pose: mergeChoice(attributes.pose, attributes.poseNote, defaults.pose),
-      location: mergeChoice(attributes.location, attributes.locationNote, defaults.location),
-      accessories: mergeChoice(attributes.accessories, attributes.accessoriesNote, defaults.accessories),
-      otherOption: mergeChoice(attributes.otherOption, attributes.otherOptionNote, defaults.otherOption),
-      otherDetails: attributes.otherDetails || "",
+      modelType: mergeChoice(modelType, modelTypeNote, defaults.modelType),
+      modelExpression: formatExpression(modelExpression, modelExpressionNote),
+      hair: mergeChoice(hair, hairNote, defaults.hair),
+      pose: mergeChoice(pose, poseNote, defaults.pose),
+      location: mergeChoice(location, locationNote, defaults.location),
+      accessories: mergeChoice(accessories, accessoriesNote, defaults.accessories),
+      otherOption: mergeChoice(otherOption, otherOptionNote, defaults.otherOption),
+      otherDetails: otherDetails || "",
     };
 
-    /* ---------------------- Prompt assembly ---------------------- */
-
+    /* -------------------- Prompt Assembly -------------------- */
     const promptParts = [];
 
-    // Preface: strict header if enabled
     if (HARD_STRICT_MODE) {
-      promptParts.push("!!!STRICT_MODE ENABLED. FOLLOW THESE INSTRUCTIONS EXACTLY.");
+      promptParts.push("!!! STRICT MODE ENABLED. FOLLOW ALL RULES EXACTLY.");
     }
-    promptParts.push("You are a professional ecommerce catalog photography AI. Create a single photorealistic image of a female model wearing a saree.");
 
-    // HARD_RULES block
+    promptParts.push(
+      "You are a professional lifestyle and corporate photographer. Create ONE completely photorealistic photograph. The final image must look like a real camera-captured photo, never an artificial composite."
+    );
+
+    /* -------------------- HARD RULES -------------------- */
     const hardRules = [
-      "The FIRST uploaded image is the MASTER FRONTAL clothing reference. Copy frontal saree design, border, motifs, embroidery, and base colours from it unless the user explicitly requests a change.",
-      "The SECOND uploaded image, if provided, is ONLY for BACK/REVERSE-SIDE reference (pallu-back, reverse border, pleat underside).",
+      "FIRST image is the MASTER saree design reference. Copy design, border, motifs, embroidery, and colors exactly.",
+      "SECOND image (if provided) is ONLY for back-side saree reference.",
       "Do NOT add text, logos, watermarks, or extra people.",
-      "Do NOT distort body parts or fabric geometry (no warped hands, missing fingers, or broken pleats).",
-      `Allowed changes: ${changedFields.length > 0 ? changedFields.join(", ") : "none (no fields explicitly selected)"}.`,
+      "Do NOT distort anatomy, fabric geometry, or perspective.",
+      `Allowed changes: ${changedFields.length ? changedFields.join(", ") : "none"}.`,
     ];
 
-    // in HARD_STRICT_MODE, repeat the "DO NOT" block emphatically to increase model adherence
     if (HARD_STRICT_MODE) {
       hardRules.push(
-        "!!! STRICT MODE: DO NOT CHANGE THE SAREE PATTERN, COLORS, BORDER, OR MOTIFS UNLESS THE USER EXPLICITLY REQUESTS. REPEAT: DO NOT CHANGE THE SAREE PATTERN, COLORS, BORDER, OR MOTIFS UNLESS EXPLICITLY REQUESTED."
+        "STRICT MODE: Saree design must remain IDENTICAL to the reference image."
       );
-      hardRules.push("!!! STRICT MODE: IF ONLY ONE FIELD IS SELECTED, DO NOT CHANGE ANY OTHER ATTRIBUTE OR PART OF THE CLOTHING.");
+      hardRules.push(
+        "STRICT MODE: Background perspective and lighting must be physically realistic."
+      );
     }
 
     promptParts.push(`[HARD_RULES]\n- ${hardRules.join("\n- ")}\n[/HARD_RULES]`);
 
-    // Model, pose, background, accessories blocks
+    /* -------------------- MODEL -------------------- */
     promptParts.push(`
 [MODEL_DESCRIPTION]
-Model type/build: ${attrPhrases.modelType}
-Expression / age: ${attrPhrases.modelExpression}
+Model: ${attrPhrases.modelType}
+Expression: ${attrPhrases.modelExpression}
 Hair: ${attrPhrases.hair}
 [/MODEL_DESCRIPTION]
 `);
 
-    const framingBase = `
-[POSE_AND_FRAMING]
-Pose requested: ${attrPhrases.pose}
-Framing: Prefer full body unless a zoom/close-up is explicitly requested.
-Ensure saree pleats, pallu, and border are visible and undistorted.
-[/POSE_AND_FRAMING]
-`;
-    promptParts.push(isZoom ? framingBase.replace("Prefer full body unless a zoom/close-up is explicitly requested.", "This is an explicit ZOOM/close-up request. Crop the frame accordingly and show the requested region.") : framingBase);
-
+    /* -------------------- CAMERA -------------------- */
     promptParts.push(`
-[BACKGROUND]
-Background/location: ${attrPhrases.location}
-Keep background minimal and complementary.
-[/BACKGROUND]
+[CAMERA_AND_LENS_REALISM]
+- Camera height: 130–145 cm from floor
+- Lens: 35–50mm full-frame equivalent
+- Perspective must align with floor, desks, sofas, windows, and ceiling lines
+- Model must not appear cut-out or closer than nearby objects
+[/CAMERA_AND_LENS_REALISM]
 `);
 
+    /* -------------------- POSE -------------------- */
+    promptParts.push(`
+[POSE_AND_FRAMING]
+Pose: ${attrPhrases.pose}
+Framing: full body unless zoom is explicitly requested
+[/POSE_AND_FRAMING]
+`);
+
+    /* -------------------- BACKGROUND (BLUR FIX HERE) -------------------- */
+    promptParts.push(`
+[SCENE_AND_BACKGROUND_REALISM]
+Location: ${attrPhrases.location}
+
+${isBlurredBackground ? `
+- Background must use OPTICAL DEPTH OF FIELD (camera lens blur), NOT artificial blur
+- Blur must be subtle and realistic, never strong or creamy
+- Blur increases gradually with distance from the model
+- Foreground floor, feet, and nearby objects remain sharp
+- Subject and background must share lighting and color temperature
+` : `
+- Background must be sharp and naturally lit
+`}
+
+LIGHTING:
+- Lighting must come from real scene sources (office lights, windows)
+- Indoor office: neutral corporate lighting, soft shadows
+- No studio lighting or spotlighting
+
+GROUNDING:
+- Strong contact shadows beneath feet
+- Ambient occlusion where saree touches floor
+- No floating or pasted look
+[/SCENE_AND_BACKGROUND_REALISM]
+`);
+
+    /* -------------------- ACCESSORIES -------------------- */
     promptParts.push(`
 [ACCESSORIES]
-Accessories: ${attrPhrases.accessories}
-They must not obscure key saree details.
+${attrPhrases.accessories}
 [/ACCESSORIES]
 `);
 
+    /* -------------------- DESIGN -------------------- */
     promptParts.push(`
 [DESIGN_CHANGE]
-Design preset: ${attrPhrases.otherOption}
+${attrPhrases.otherOption}
 Extra details: ${attrPhrases.otherDetails}
-If a color or motif change is requested, apply only that change and preserve frontal structure otherwise.
 [/DESIGN_CHANGE]
 `);
 
     if (base64Image2) {
       promptParts.push(`
 [SECONDARY_IMAGE_USAGE]
-Use the SECOND image only for BACK/REVERSE-SIDE details (pleat underside, reverse border, back embroidery). Do NOT copy frontal features from this image.
+Use second image ONLY for back or reverse saree details
 [/SECONDARY_IMAGE_USAGE]
 `);
     }
 
+    /* -------------------- QUALITY -------------------- */
     promptParts.push(`
-[QUALITY_AND_NEGATIVES]
-- Ultra high quality, realistic textures, correct fabric reflections.
-- No text, no logos, no extra people, no watermarks.
-- Maintain correct human proportions and realistic hands.
-[/QUALITY_AND_NEGATIVES]
-    `);
+[QUALITY_AND_REALISM]
+- Indistinguishable from a real corporate or lifestyle photograph
+- No halos, cut edges, or subject isolation
+- Natural skin texture and fabric fall
+- No text, logos, or artifacts
+[/QUALITY_AND_REALISM]
+`);
 
     const promptText = promptParts.join("\n");
 
-    // Debug logging
-    console.log("===== Gemini Generation Request =====");
-    console.log("HARD_STRICT_MODE:", HARD_STRICT_MODE);
-    console.log("Parsed attributes (server-normalized):", { attributes, changedFields, isZoom, secondImageProvided: Boolean(base64Image2) });
-    const MAX_LOG = 12000;
-    console.log("Final prompt (truncated):");
-    console.log(promptText.length > MAX_LOG ? promptText.slice(0, MAX_LOG) + "\n...[TRUNCATED]" : promptText);
-    console.log("======================================");
-
-    // Build contents
+    /* -------------------- Gemini Call -------------------- */
     const contents = [
       { inlineData: { mimeType: file.mimetype, data: base64Image } },
     ];
+
     if (base64Image2) {
-      contents.push({ inlineData: { mimeType: secondaryFile.mimetype, data: base64Image2 } });
+      contents.push({
+        inlineData: { mimeType: secondaryFile.mimetype, data: base64Image2 },
+      });
     }
+
     contents.push({ text: promptText });
 
-    // Call Gemini
     const response = await genAI.models.generateContent({
       model: "gemini-2.5-flash-image",
       contents,
       config: {
-        imageConfig: {
-          aspectRatio: isZoom ? "3:4" : "3:4",
-        },
+        imageConfig: { aspectRatio: "3:4" },
       },
     });
 
     const parts = response?.candidates?.[0]?.content?.parts || [];
     let imageBase64 = null;
+
     for (const part of parts) {
       if (part.inlineData?.data) {
         imageBase64 = part.inlineData.data;
@@ -245,25 +261,20 @@ Use the SECOND image only for BACK/REVERSE-SIDE details (pleat underside, revers
     }
 
     if (!imageBase64) {
-      console.error("Gemini returned no image. Full response:", JSON.stringify(response || {}, null, 2));
       return res.status(500).json({ error: "No image returned from Gemini." });
     }
-
-    const debugAttributes = {
-      attributes,
-      changedFields,
-      isZoom,
-      secondImageProvided: Boolean(base64Image2),
-      HARD_STRICT_MODE,
-      promptUsedTruncated: promptText.length > MAX_LOG ? promptText.slice(0, MAX_LOG) + "\n...[TRUNCATED]" : promptText,
-    };
 
     return res.json({
       imageBase64,
       promptUsed: promptText,
-      debugAttributes,
       provider: "gemini",
+      debug: {
+        HARD_STRICT_MODE,
+        isBlurredBackground,
+        changedFields,
+      },
     });
+
   } catch (err) {
     console.error("Gemini error:", err);
     return res.status(500).json({ error: err.message || "Something went wrong." });
