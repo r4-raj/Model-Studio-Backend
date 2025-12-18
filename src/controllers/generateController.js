@@ -12,9 +12,18 @@ export const generateImage = async (req, res) => {
     const files = req.files || {};
     const file = files.referenceImage?.[0];
     const secondaryFile = files.referenceImage2?.[0];
+    // In MODEL_REFERENCE_BASED mode, second image is mandatory
 
     const raw = req.body || {};
+    // NEW: generation mode
 
+    const genMode = raw.generationMode || "POSE_BASED";
+
+    if (genMode === "MODEL_REFERENCE_BASED" && !secondaryFile) {
+      return res.status(400).json({
+        error: "Model reference image is required for this mode.",
+      });
+    }
     const {
       pose,
       location,
@@ -41,8 +50,10 @@ export const generateImage = async (req, res) => {
     const base64Image2 = secondaryFile?.buffer?.toString("base64");
 
     /* ---------------------------- Helpers ---------------------------- */
-    const present = (v) => v !== undefined && v !== null && String(v).trim() !== "";
-    const isArrayPresent = (v) => Array.isArray(v) ? v.length > 0 : present(v);
+    const present = (v) =>
+      v !== undefined && v !== null && String(v).trim() !== "";
+    const isArrayPresent = (v) =>
+      Array.isArray(v) ? v.length > 0 : present(v);
 
     const mergeChoice = (dropdown, note, fallback) => {
       if (isArrayPresent(dropdown)) {
@@ -71,7 +82,9 @@ export const generateImage = async (req, res) => {
       modelType: present(modelType) ? modelType : null,
       modelTypeNote: present(modelTypeNote) ? modelTypeNote : null,
       modelExpression: isArrayPresent(modelExpression) ? modelExpression : null,
-      modelExpressionNote: present(modelExpressionNote) ? modelExpressionNote : null,
+      modelExpressionNote: present(modelExpressionNote)
+        ? modelExpressionNote
+        : null,
       hair: present(hair) ? hair : null,
       hairNote: present(hairNote) ? hairNote : null,
       pose: present(pose) ? pose : null,
@@ -90,31 +103,74 @@ export const generateImage = async (req, res) => {
     );
 
     /* -------------------- Zoom Detection -------------------- */
-    const poseText = (attributes.pose || "") + " " + (attributes.poseNote || "");
-    const zoomKeywords = ["zoom", "close up", "close-up", "head to knees", "closeup"];
+    const poseText =
+      (attributes.pose || "") + " " + (attributes.poseNote || "");
+    const zoomKeywords = [
+      "zoom",
+      "close up",
+      "close-up",
+      "head to knees",
+      "closeup",
+    ];
+    // Detect mirror adjustment pose safely
+    const isMirrorPose = poseText.toLowerCase().includes("mirror");
+    const isKitchenLaptop =
+      poseText.toLowerCase().includes("laptop") ||
+      poseText.toLowerCase().includes("working on laptop");
+      const isKitchenCooking =
+  poseText.toLowerCase().includes("kitchen cooking") ||
+  poseText.toLowerCase().includes("chopping") ||
+  poseText.toLowerCase().includes("cutting vegetables");
+  const isKitchenCoffee =
+  poseText.toLowerCase().includes("coffee") ||
+  poseText.toLowerCase().includes("tea") ||
+  poseText.toLowerCase().includes("holding cup") ||
+  poseText.toLowerCase().includes("kitchen coffee");
+
     const isZoom = zoomKeywords.some((kw) =>
       poseText.toLowerCase().includes(kw)
     );
 
     /* -------------------- Defaults -------------------- */
     const defaults = {
-      modelType: "Indian woman, medium height, average build, realistic proportions",
+      modelType:
+        "Indian woman, medium height, average build, realistic proportions",
       modelExpression: "natural relaxed expression, age 20–40",
       hair: "classic Indian hairstyle, neat bun or braid",
       pose: "full body front pose, standing naturally, weight balanced",
       location: "modern living room interior, home environment",
       accessories: "light traditional jewellery only",
-      otherOption: "match saree design, border, motifs, and colours exactly from primary reference image",
+      otherOption:
+        "match saree design, border, motifs, and colours exactly from primary reference image",
     };
 
     const attrPhrases = {
-      modelType: mergeChoice(attributes.modelType, attributes.modelTypeNote, defaults.modelType),
-      modelExpression: formatExpression(attributes.modelExpression, attributes.modelExpressionNote),
+      modelType: mergeChoice(
+        attributes.modelType,
+        attributes.modelTypeNote,
+        defaults.modelType
+      ),
+      modelExpression: formatExpression(
+        attributes.modelExpression,
+        attributes.modelExpressionNote
+      ),
       hair: mergeChoice(attributes.hair, attributes.hairNote, defaults.hair),
       pose: mergeChoice(attributes.pose, attributes.poseNote, defaults.pose),
-      location: mergeChoice(attributes.location, attributes.locationNote, defaults.location),
-      accessories: mergeChoice(attributes.accessories, attributes.accessoriesNote, defaults.accessories),
-      otherOption: mergeChoice(attributes.otherOption, attributes.otherOptionNote, defaults.otherOption),
+      location: mergeChoice(
+        attributes.location,
+        attributes.locationNote,
+        defaults.location
+      ),
+      accessories: mergeChoice(
+        attributes.accessories,
+        attributes.accessoriesNote,
+        defaults.accessories
+      ),
+      otherOption: mergeChoice(
+        attributes.otherOption,
+        attributes.otherOptionNote,
+        defaults.otherOption
+      ),
       otherDetails: attributes.otherDetails || "",
     };
 
@@ -123,12 +179,30 @@ export const generateImage = async (req, res) => {
       (attrPhrases.location || "").toLowerCase().includes("living room") ||
       (attrPhrases.location || "").toLowerCase().includes("home");
 
+    const indoorNoCeiling =
+      (attrPhrases.location || "").toLowerCase().includes("living room") ||
+      (attrPhrases.location || "").toLowerCase().includes("home") ||
+      (attrPhrases.location || "").toLowerCase().includes("office");
+
     /* -------------------- Prompt Assembly -------------------- */
     const promptParts = [];
 
     if (HARD_STRICT_MODE) {
       promptParts.push("!!! STRICT MODE ENABLED. FOLLOW ALL RULES EXACTLY.");
     }
+    promptParts.push(`
+[POSE_LOCK — CRITICAL]
+- Use the EXACT pose described below
+- Do NOT invent a new pose
+- Do NOT alter body angle, limb position, or stance
+- Pose must match the description word-for-word
+
+POSE TO FOLLOW EXACTLY:
+${attrPhrases.pose}
+
+If pose does not match, image is INVALID.
+[/POSE_LOCK]
+`);
 
     promptParts.push(
       "You are a world-class commercial lifestyle photographer. Create ONE completely photorealistic photograph. The final image must look like a real indoor photograph, never a studio cutout."
@@ -140,7 +214,9 @@ export const generateImage = async (req, res) => {
       "SECOND image (if provided) is ONLY for back-side saree reference.",
       "Do NOT add text, logos, watermarks, or extra people.",
       "Do NOT distort anatomy or fabric geometry.",
-      `Allowed changes: ${changedFields.length ? changedFields.join(", ") : "none"}.`,
+      `Allowed changes: ${
+        changedFields.length ? changedFields.join(", ") : "none"
+      }.`,
     ];
 
     if (HARD_STRICT_MODE) {
@@ -152,7 +228,9 @@ export const generateImage = async (req, res) => {
       );
     }
 
-    promptParts.push(`[HARD_RULES]\n- ${hardRules.join("\n- ")}\n[/HARD_RULES]`);
+    promptParts.push(
+      `[HARD_RULES]\n- ${hardRules.join("\n- ")}\n[/HARD_RULES]`
+    );
 
     /* -------------------- MODEL -------------------- */
     promptParts.push(`
@@ -174,15 +252,131 @@ export const generateImage = async (req, res) => {
           [/CAMERA_AND_LENS_REALISM]
           `);
 
-
     /* -------------------- POSE -------------------- */
     promptParts.push(`
-    [POSE_AND_FRAMING]
-    Pose: ${attrPhrases.pose}
-    Framing: full body unless zoom is explicitly requested
-    Ensure saree pleats, pallu, and borders are clearly visible
-    [/POSE_AND_FRAMING]
-    `);
+[POSE_AND_FRAMING]
+Pose & activity: ${attrPhrases.pose}
+
+FRAMING RULES:
+- Medium close-up to three-quarter shot
+- Model fills 70–80% of the frame
+- Camera is close enough to clearly show saree fabric texture
+- Front-facing or slight 3/4 angle only
+- Saree design must be clearly readable
+
+ABSOLUTELY FORBIDDEN:
+- Distant shots
+- Tiny model in frame
+- Excessive background visibility
+[/POSE_AND_FRAMING]
+`);
+
+    // STRICT mirror-adjustment composition lock
+    if (isMirrorPose) {
+      promptParts.push(`
+[MIRROR_ADJUSTMENT_LOCK]
+- Scene must be a bedroom or dressing area with a standing mirror
+- Camera positioned directly facing the mirror (eye-level)
+- BOTH real model and mirror reflection must be visible
+- Framing: waist-up to mid-thigh (NOT full body, NOT wide)
+- Model must fill at least 80% of the frame
+- Hands raised adjusting hair, earrings, or saree pallu
+- Front of saree (pleats + pallu) must be clearly visible
+- Mirror frame visible but subtle, not dominating
+- Background minimal: bed, curtain, wall only
+
+STRICTLY FORBIDDEN:
+- Wide room shots
+- Distant camera
+- Missing reflection
+- Side angles
+- Ceiling or roof visibility
+[/MIRROR_ADJUSTMENT_LOCK]
+`);
+if (isKitchenCoffee) {
+  promptParts.push(`
+[KITCHEN_COFFEE_CATALOG_FRAMING – STRICT]
+- Model standing at kitchen counter holding a coffee or tea mug
+- One hand holding cup near lips or chest, other hand relaxed
+- Camera framing: mid-shot (from chest to mid-thigh)
+- Camera angle: straight-on, eye-level
+- Saree pallu, pleats, blouse neckline, and waist clearly visible
+- Saree front print must be fully visible and centered
+- Saree must occupy at least 70% of the frame
+- Mug is a secondary prop and must not block saree design
+- Kitchen background modern, clean, softly blurred
+- DO NOT show ceiling, roof, upper cabinets, or wide-angle views
+- Lighting: soft indoor daylight, warm and natural
+- Focus priority: saree fabric, print clarity, border, pleats, drape
+- Expression: calm, lifestyle, natural catalog look
+- Output must match premium lifestyle saree catalog photography
+[/KITCHEN_COFFEE_CATALOG_FRAMING – STRICT]
+`);
+}
+}
+    if (isKitchenLaptop) {
+  promptParts.push(`
+[KITCHEN_LAPTOP_FRAMING – STRICT]
+- Camera framing: medium shot from waist to head
+- Camera height: chest-level or eye-level
+- Model standing or lightly leaning at kitchen counter
+- Laptop placed on counter, both hands visible typing
+- Saree pallu, pleats, blouse neckline, and waist must be clearly visible
+- Saree must occupy at least 65–75% of the frame
+- Background kitchen should be softly blurred, not wide-angle
+- DO NOT show ceiling, roof, or upper cabinets
+- Focus priority: saree fabric, print, border, drape
+- Activity (laptop work) is secondary and natural
+- Lighting: soft indoor daylight, realistic shadows
+- Output must resemble a professional lifestyle catalog photograph
+[/KITCHEN_LAPTOP_FRAMING – STRICT]
+`);
+}
+
+if (isKitchenCooking) {
+  promptParts.push(`
+[KITCHEN_COOKING_CATALOG_FRAMING – STRICT]
+- Model standing at kitchen counter cutting vegetables on a chopping board
+- Camera framing: mid-shot (from chest to just below waist)
+- Camera angle: straight-on, slightly downward (5–7 degrees)
+- Both hands clearly visible holding knife and vegetables
+- Saree pleats, waist drape, blouse sleeves, and pallu clearly visible
+- Saree front design must be fully readable and uninterrupted
+- Saree must occupy at least 70% of the frame
+- Cooking utensils remain secondary and minimal
+- Kitchen background softly blurred, modern and clean
+- DO NOT show ceiling, roof, upper cabinets, or wide-angle distortion
+- Lighting: soft indoor daylight, natural shadows, realistic skin tones
+- Focus priority: saree fabric, print clarity, border, pleats, and drape
+- Activity (cutting vegetables) must feel natural and lifestyle-like
+- Output must match professional saree catalog photography standards
+[/KITCHEN_COOKING_CATALOG_FRAMING – STRICT]
+`);
+}
+
+    promptParts.push(`
+[ANTI_WIDE_SHOT_FAILSAFE]
+If the model appears too far from camera, REFRAME closer.
+If saree design is not dominant, ZOOM IN.
+If background is more visible than saree, CROP TIGHTER.
+This is a saree catalog image, NOT an interior photo.
+[/ANTI_WIDE_SHOT_FAILSAFE]
+`);
+
+    /* -------------------- POSE LOCK & CAMERA DISTANCE -------------------- */
+    promptParts.push(`
+[POSE_LOCK_AND_CAMERA]
+- The selected pose is the MASTER reference for body angle, activity, and framing
+- Camera distance MUST match lifestyle catalog examples
+- Use MID-SHOT or THREE-QUARTER framing (waist to head or knees to head)
+- Saree pleats, pallu, and blouse must dominate the frame
+- Activity (cooking, laptop, mirror) is SECONDARY and must not distract
+- NO wide shots
+- NO full-room views
+- NO ceiling, roof, or upper wall edges
+- Camera at human eye-level, slightly forward
+[/POSE_LOCK_AND_CAMERA]
+`);
 
     /* -------------------- SCENE INTEGRATION -------------------- */
     promptParts.push(`
@@ -250,6 +444,35 @@ export const generateImage = async (req, res) => {
     - No text, logos, or artifacts
     [/QUALITY_AND_REALISM]
     `);
+    // NEW: Model Reference Based Mode
+    if (genMode === "MODEL_REFERENCE_BASED") {
+      promptParts.push(`
+[MODEL_REFERENCE_LOCK]
+- SECOND image is the MASTER reference for pose, body angle, camera height, lens, framing, lighting, and background
+- DO NOT change pose, camera angle, zoom, or background
+- DO NOT add or remove people
+- FIRST image is saree design reference ONLY
+- Replace ONLY the saree fabric on the model’s body
+- Do NOT change blouse shape unless saree reference clearly shows it
+- Do NOT change pleat structure or drape style from model reference
+- Saree colors, motifs, borders, embroidery must match the FIRST image exactly
+- Fabric must follow body folds and gravity naturally
+- Pose, camera, and environment must remain identical to the SECOND image
+[/MODEL_REFERENCE_LOCK]
+`);
+    }
+    if (indoorNoCeiling) {
+      promptParts.push(`
+[NO_CEILING_ENFORCEMENT — CRITICAL]
+- ABSOLUTELY DO NOT show ceiling, roof, beams, crown molding, or upper wall edges
+- Camera height must be chest-level or slightly higher
+- Camera must be angled slightly downward (never upward)
+- Frame must cut off ABOVE windows and doors
+- Background must feel like a lifestyle photoshoot, not architectural photography
+- If ceiling appears, the image is INVALID
+[/NO_CEILING_ENFORCEMENT]
+`);
+    }
 
     const promptText = promptParts.join("\n");
 
@@ -258,8 +481,14 @@ export const generateImage = async (req, res) => {
       { inlineData: { mimeType: file.mimetype, data: base64Image } },
     ];
 
-    if (base64Image2) {
-      contents.push({ inlineData: { mimeType: secondaryFile.mimetype, data: base64Image2 } });
+    // NEW: add model reference image second
+    if (genMode === "MODEL_REFERENCE_BASED") {
+      contents.push({
+        inlineData: {
+          mimeType: secondaryFile.mimetype,
+          data: base64Image2,
+        },
+      });
     }
 
     contents.push({ text: promptText });
@@ -298,9 +527,10 @@ export const generateImage = async (req, res) => {
         changedFields,
       },
     });
-
   } catch (err) {
     console.error("Gemini error:", err);
-    return res.status(500).json({ error: err.message || "Something went wrong." });
+    return res
+      .status(500)
+      .json({ error: err.message || "Something went wrong." });
   }
 };
