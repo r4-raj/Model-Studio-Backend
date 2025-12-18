@@ -16,6 +16,7 @@ app.use(express.json({ limit: '50mb' })); // Ensure body parser handles large im
 app.get("/", (req, res) => {
   res.send("Model Studio backend is running");
 });
+app.options("*", cors());
 
 // 🚨 FIX HERE: Change the route base path to /api
 // This allows generateRouter to define the POST route at /generate-image
